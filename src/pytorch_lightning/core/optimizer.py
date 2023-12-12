@@ -177,6 +177,7 @@ def _init_optimizers_and_lr_schedulers(
     model: "pl.LightningModule",
 ) -> Tuple[List[Optimizer], List[LRSchedulerConfig], List[int]]:
     """Calls `LightningModule.configure_optimizers` and parses and validates the output."""
+    print('in optimizer.py in _init_optimizers_and_lr_schedulers', flush=True)
     optim_conf = model.trainer._call_lightning_module_hook("configure_optimizers", pl_module=model)
 
     if optim_conf is None:
@@ -199,6 +200,7 @@ def _init_optimizers_and_lr_schedulers(
 def _configure_optimizers(
     optim_conf: Union[Dict[str, Any], List, Optimizer, Tuple]
 ) -> Tuple[List, List, List, Optional[str]]:
+    print('in optimizer.py in _configure_optimizers', flush=True)
     optimizers, lr_schedulers, optimizer_frequencies = [], [], []
     monitor = None
 

@@ -75,12 +75,16 @@ class PrecisionPlugin(FabricPrecision, CheckpointHooks):
 
     def _after_closure(self, model: "pl.LightningModule", optimizer: Steppable, optimizer_idx: int) -> None:
         """Utility to share some code after the closure has been run."""
+        print('in precision_plugin.py in _after_closure', flush=True)
         trainer = model.trainer
+        print('in precision_plugin.py before _call_callback_hooks(on_before_optimizer_step)', flush=True)
         trainer._call_callback_hooks("on_before_optimizer_step", optimizer, optimizer_idx)
+        print('in precision_plugin.py before _call_lightning_module_hook(on_before_optimizer_step)', flush=True)
         trainer._call_lightning_module_hook("on_before_optimizer_step", optimizer, optimizer_idx)
         # TODO: this is done for the entire model but should be changed to per-optimizer
         if optimizer_idx == 0:
             self._track_grad_norm(trainer)
+        print('in precision_plugin in _after_closure before _clip_gradients', flush=True)
         self._clip_gradients(
             model,
             optimizer,
@@ -141,10 +145,12 @@ class PrecisionPlugin(FabricPrecision, CheckpointHooks):
         clip_val: Optional[Union[int, float]] = None,
         gradient_clip_algorithm: Optional[GradClipAlgorithmType] = None,
     ) -> None:
+        print('in precision_plugin in _clip_gradients', flush=True)
         if not isinstance(model, pl.LightningModule) or not model.automatic_optimization:
             # the configuration validator disallows clipping on manual
             return
 
+        print('in precision_plugin in _clip_gradients before _call_lightning_module_hook(configure_gradient_clipping)', flush=True)
         model.trainer._call_lightning_module_hook(
             "configure_gradient_clipping",
             optimizer,
@@ -152,6 +158,7 @@ class PrecisionPlugin(FabricPrecision, CheckpointHooks):
             gradient_clip_val=clip_val,
             gradient_clip_algorithm=gradient_clip_algorithm,
         )
+        print('in precision_plugin in _clip_gradients after _call_lightning_module_hook(configure_gradient_clipping)', flush=True)
 
     def clip_gradients(
         self,
@@ -183,6 +190,7 @@ class PrecisionPlugin(FabricPrecision, CheckpointHooks):
     @contextlib.contextmanager
     def train_step_context(self) -> Generator[None, None, None]:
         """A contextmanager for the training step."""
+        # print('in precision_plugin.py in train_step_context', flush=True)
         with self.forward_context():
             yield
 

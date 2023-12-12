@@ -179,6 +179,7 @@ class EarlyStopping(Callback):
         return trainer.state.fn != TrainerFn.FITTING or trainer.sanity_checking
 
     def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        print('in early_stopping.py in on_train_epoch_end', flush=True)
         if not self._check_on_train_epoch_end or self._should_skip_check(trainer):
             return
         self._run_early_stopping_check(trainer)

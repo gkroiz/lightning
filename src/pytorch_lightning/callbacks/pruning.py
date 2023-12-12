@@ -392,6 +392,7 @@ class ModelPruning(Callback):
             self.apply_lottery_ticket_hypothesis()
 
     def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: LightningModule) -> None:
+        print('in pruning.py in on_train_epoch_end', flush=True)
         if self._prune_on_train_epoch_end:
             rank_zero_debug("`ModelPruning.on_train_epoch_end`. Applying pruning")
             self._run_pruning(pl_module.current_epoch)

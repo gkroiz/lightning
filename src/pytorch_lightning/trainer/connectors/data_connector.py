@@ -351,12 +351,15 @@ class DataConnector:
         Returns:
             Tuple (num_batches, dataloaders)
         """
+        print('in data_connector.py in _reset_eval_dataloader', flush=True)
         assert mode.evaluating or mode == RunningStage.PREDICTING
 
         # always get the loaders first so we can count how many there are
+        print('in data_connector.py in _reset_eval_dataloader before _request_dataloader', flush=True)
         dataloaders = self._request_dataloader(mode)
 
         if self.trainer.overfit_batches > 0:
+            print('in data_connector.py in _reset_eval_dataloader before _resolve_overfit_batches', flush=True)
             dataloaders = self._resolve_overfit_batches(dataloaders, mode)
 
         if not isinstance(dataloaders, list):
@@ -366,6 +369,7 @@ class DataConnector:
             rank_zero_warn("One of given dataloaders is None and it will be skipped.")
 
         for loader in dataloaders:
+            print('in data_connector.py in _reset_eval_dataloader before _check_eval_shuffling', flush=True)
             apply_to_collection(
                 loader.loaders if isinstance(loader, CombinedLoader) else loader,
                 DataLoader,
@@ -374,9 +378,11 @@ class DataConnector:
             )
 
         # add samplers
+        print('in data_connector.py in _reset_eval_dataloader before _prepare_dataloader', flush=True)
         dataloaders = [self._prepare_dataloader(dl, mode=mode) for dl in dataloaders if dl is not None]
 
         # add worker_init_fn for correct seeding in worker processes
+        print('in data_connector.py in _reset_eval_dataloader before _auto_add_worker_init_fn', flush=True)
         apply_to_collection(
             dataloaders, dtype=DataLoader, function=_auto_add_worker_init_fn, rank=self.trainer.global_rank
         )
@@ -387,8 +393,10 @@ class DataConnector:
         module = model or self.trainer.lightning_module or self.datamodule
         if len(dataloaders) != 0:
             for i, dataloader in enumerate(dataloaders):
+                print(f'in data_connector.py in _reset_eval_dataloader {i}: {dataloader}: ', flush=True)
+                print('in data_connector.py in _reset_eval_dataloader before has_len_all_ranks', flush=True)
                 orig_num_batches = num_batches = (
-                    len(dataloader) if has_len_all_ranks(dataloader, self.trainer.strategy, module) else float("inf")
+                    len(dataloader) if has_len_all_ranks(dataloader, self.trainer.strategy, module, group=self.trainer.sibling_group) else float("inf")
                 )
 
                 if orig_num_batches == 0:
@@ -396,6 +404,7 @@ class DataConnector:
                     loader_num_batches.append(orig_num_batches)
                     continue
 
+                print('in data_connector.py in _reset_eval_dataloader before _worker_check', flush=True)
                 self._worker_check(dataloader, f"{mode.dataloader_prefix}_dataloader {i}")
 
                 # percent or num_steps
@@ -428,6 +437,7 @@ class DataConnector:
 
                 loader_num_batches.append(num_batches)
 
+        print('in data_connector.py leaving _reset_eval_dataloader', flush=True)
         return loader_num_batches, dataloaders
 
     def _request_dataloader(self, stage: RunningStage) -> TRAIN_DATALOADERS:
@@ -446,7 +456,9 @@ class DataConnector:
             dataloader = source.dataloader()
         if isinstance(dataloader, tuple):
             dataloader = list(dataloader)
-        self.trainer.strategy.barrier("get_dataloaders")
+        print('in data_connector.py before barrier(get_dataloaders)', flush=True)
+        self.trainer._custom_barrier("get_dataloaders")
+        print('in data_connector.py after barrier(get_dataloaders)', flush=True)
         _validate_fault_tolerant_automatic(dataloader, stage)
         return dataloader
 

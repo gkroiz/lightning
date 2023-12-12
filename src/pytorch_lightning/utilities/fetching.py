@@ -244,6 +244,7 @@ class DataFetcher(AbstractDataFetcher):
             except StopIteration:
                 # this would only happen when prefetch_batches > the number of batches available and makes
                 # `fetching_function` jump directly to the empty iterator case without trying to fetch again
+                print('in fetching.py self.done = True', flush=True)
                 self.done = True
                 break
 
@@ -257,6 +258,7 @@ class DataFetcher(AbstractDataFetcher):
                 # refill the consumed batch
                 self._fetch_next_batch(self.dataloader_iter)
             except StopIteration:
+                print('in fetching.py self.done = not self.batches', flush=True)
                 # no more batches to fetch. we are done only if all pre-fetched batches were returned
                 self.done = not self.batches
         elif not self.done:
@@ -266,10 +268,12 @@ class DataFetcher(AbstractDataFetcher):
                 # consume the batch we just fetched
                 batch = self.batches.pop(0)
             except StopIteration as e:
+                print('in fetching.py self.done = True 2', flush=True)
                 self.done = True
                 raise e
         else:
             # the iterator is empty
+            print('in fetching.py before StopIteration', flush=True)
             raise StopIteration
         self.wait()
         return self.move_to_device(batch)
@@ -279,6 +283,7 @@ class DataFetcher(AbstractDataFetcher):
         try:
             batch = next(iterator)
         except StopIteration as e:
+            print('in fetching.py in _fetch_next_batch', flush=True)
             self._stop_profiler()
             raise e
         self.fetched += 1
@@ -363,6 +368,7 @@ class StepFuncDataLoaderIter(Iterator):
             self.data_fetcher.fetched += 1
             return data
         except StopIteration as e:
+            print('in fetching, in StepFuncDataLoaderIter.__next__', flush=True)
             self.data_fetcher.done = True
             raise e
 
@@ -399,4 +405,5 @@ class DataLoaderIterDataFetcher(AbstractDataFetcher):
     def fetching_function(self) -> Tuple[int, Iterator]:
         if not self.done:
             return self.fetched, self.iterator
+        print('in fetching.py in fetching_function before StopIteration', flush=True)
         raise StopIteration

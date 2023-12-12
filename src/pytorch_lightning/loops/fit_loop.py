@@ -193,12 +193,14 @@ class FitLoop(Loop[None]):
         self.epoch_loop = epoch_loop
 
     def reset(self) -> None:
+        print('in fit_loop.py in reset', flush=True)
         """Resets the internal state of this loop."""
         if self.restarting:
             self.epoch_progress.reset_on_restart()
 
     def on_run_start(self) -> None:
         """Calls the ``on_train_start`` hook."""
+        print('in fit_loop.py in on_run_start', flush=True)
         # update the current_epoch in-case of checkpoint reload
         if not self._iteration_based_training():
             self.epoch_progress.current.completed = self.epoch_progress.current.processed
@@ -220,6 +222,7 @@ class FitLoop(Loop[None]):
 
     def on_advance_start(self) -> None:
         """Prepares the dataloader for training and calls the hook ``on_train_epoch_start``"""
+        print('in fit_loop in on_advance_start', flush=True)
         model = self.trainer.lightning_module
 
         # reset train dataloader
@@ -252,6 +255,7 @@ class FitLoop(Loop[None]):
 
     def advance(self) -> None:
         """Runs one whole epoch."""
+        print('in fit_loop.py in advance', flush=True)
         log.detail(f"{self.__class__.__name__}: advancing loop")
         assert self.trainer.train_dataloader is not None
         dataloader = self.trainer.train_dataloader
@@ -267,6 +271,7 @@ class FitLoop(Loop[None]):
             self._outputs = self.epoch_loop.run(self._data_fetcher)
 
     def on_advance_end(self) -> None:
+        print('in fit_loop in on_advance_end', flush=True)
         # inform logger the batch loop has finished
         self.trainer._logger_connector.epoch_end_reached()
 
@@ -289,14 +294,19 @@ class FitLoop(Loop[None]):
         # free memory
         self._outputs = []
 
+        print('in fit_loop.py before increment_processed', flush=True)
         self.epoch_progress.increment_processed()
 
         # call train epoch end hooks
+        print('in fit_loop.py before _call_callback_hooks(on_train_epoch_end)', flush=True)
         self.trainer._call_callback_hooks("on_train_epoch_end")
+        print('in fit_loop.py before _call_lightning_module_hook(on_train_epoch_end)', flush=True)
         self.trainer._call_lightning_module_hook("on_train_epoch_end")
 
+        print('in fit_loop.py before _logger_connector(on_train_epoch_end)', flush=True)
         self.trainer._logger_connector.on_epoch_end()
 
+        print('in fit_loop.py self.epoch_loop._num_ready_batches_reached(): ', self.epoch_loop._num_ready_batches_reached(), flush=True)
         if self.epoch_loop._num_ready_batches_reached():
             # if we are restarting and the above condition holds, it's because we are reloading an epoch-end checkpoint.
             # since metric-based schedulers require access to metrics and those are not currently saved in the
@@ -307,13 +317,18 @@ class FitLoop(Loop[None]):
         # even when the batch loop has finished
         self.epoch_loop._batches_that_stepped -= 1
         # log epoch metrics
+        print('in fit_loop.py before _logger_connector.update_train_epoch_metrics', flush=True)
         self.trainer._logger_connector.update_train_epoch_metrics()
         self.epoch_loop._batches_that_stepped += 1
 
+        print('in fit_loop.py before epoch_progress.increment_completed', flush=True)
         self.epoch_progress.increment_completed()
 
         # if fault tolerant is enabled and process has been notified, exit.
+        print('in fit_loop.py before _exit_gracefully_on_signal', flush=True)
         self.trainer._exit_gracefully_on_signal()
+        print('in fit_loop.py after _exit_gracefully_on_signal', flush=True)
+        
 
     def on_run_end(self) -> None:
         """Calls the ``on_train_end`` hook."""

@@ -106,11 +106,13 @@ class MixedPrecisionPlugin(PrecisionPlugin):
     def autocast_context_manager(self) -> torch.autocast:
         # the dtype could be automatically inferred but we need to manually set it due to a bug upstream
         # https://github.com/pytorch/pytorch/issues/67233
+        # print('in native_amp.py in autocast_context_manager', flush=True)
         return torch.autocast(self.device, dtype=torch.bfloat16 if self.precision == "bf16" else torch.half)
 
     @contextmanager
     def forward_context(self) -> Generator[None, None, None]:
         """Enable autocast context."""
+        # print('in native_amp.py in forward_context', flush=True)
         with self.autocast_context_manager():
             yield
 

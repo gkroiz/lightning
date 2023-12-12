@@ -156,8 +156,10 @@ class Timer(Callback):
         self._check_time_remaining(trainer)
 
     def on_train_epoch_end(self, trainer: "pl.Trainer", *args: Any, **kwargs: Any) -> None:
+        print('in timer.py in on_train_epoch_end', flush=True)
         if self._interval != Interval.epoch or self._duration is None:
             return
+        print('in timer.py in on_train_epoch_end before _check_time_remaining.py', flush=True)
         self._check_time_remaining(trainer)
 
     def state_dict(self) -> Dict[str, Any]:
@@ -172,6 +174,7 @@ class Timer(Callback):
         should_stop = self.time_elapsed() >= self._duration
         should_stop = trainer.strategy.broadcast(should_stop)
         trainer.should_stop = trainer.should_stop or should_stop
+        print('in timer.py _check_time_remaining, should_stop: ', should_stop, flush=True)
         if should_stop and self._verbose:
             elapsed = timedelta(seconds=int(self.time_elapsed(RunningStage.TRAINING)))
             rank_zero_info(f"Time limit reached. Elapsed time is {elapsed}. Signaling Trainer to stop.")

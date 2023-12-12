@@ -132,16 +132,27 @@ class Closure(AbstractClosure[ClosureResult]):
         self._zero_grad_fn = zero_grad_fn
 
     def closure(self, *args: Any, **kwargs: Any) -> ClosureResult:
+        print('in optimizer_loop, in closure', flush=True)
+        print('in optimizer_loop in closure, self._step_fn: ', self._step_fn, flush=True)
+        print('in optimizer_loop, in closure before _step_fn', flush=True)
         step_output = self._step_fn()
+        print('in optimizer_loop, in closure after _step_fn', flush=True)
+        
 
         if step_output.closure_loss is None:
             self.warning_cache.warn("`training_step` returned `None`. If this was on purpose, ignore this warning...")
 
         if self._zero_grad_fn is not None:
+            print('in optimizer_loop, in closure before _zero_grad_fn', flush=True)
+            print('in optimizer_loop in closure, self._zero_grad_fn: ', self._zero_grad_fn, flush=True)
             self._zero_grad_fn()
+            print('in optimizer_loop, in closure after _zero_grad_fn', flush=True)
 
         if self._backward_fn is not None and step_output.closure_loss is not None:
+            print('in optimizer_loop, in closure before _backward_fn', flush=True)
+            print('in optimizer_loop in closure, self._backward_fn: ', self._backward_fn, flush=True)
             self._backward_fn(step_output.closure_loss)
+            print('in optimizer_loop, in closure after _backward_fn', flush=True)
 
         return step_output
 
@@ -416,15 +427,22 @@ class OptimizerLoop(Loop[_OUTPUTS_TYPE]):
             A ``ClosureResult`` containing the training step output.
         """
         # manually capture logged metrics
+        print('in optimizer_loop.py in _training_step', flush=True)
+        print('in optimizer_loop.py in _training_step before _call_strategy_hook(training_step)', flush=True)
         training_step_output = self.trainer._call_strategy_hook("training_step", *kwargs.values())
+        print('in optimizer_loop.py in _training_step before post_training_step', flush=True)
         self.trainer.strategy.post_training_step()
 
+        print('in optimizer_loop.py in _training_step before _call_lightning_module_hook(training_step_end)', flush=True)
         model_output = self.trainer._call_lightning_module_hook("training_step_end", training_step_output)
+        print('in optimizer_loop.py in _training_step before _call_strategy_hook(training_step_end)', flush=True)
         strategy_output = self.trainer._call_strategy_hook("training_step_end", training_step_output)
         training_step_output = strategy_output if model_output is None else model_output
 
+        print('in optimizer_loop.py in _training_step before _extract_hiddens()', flush=True)
         self._hiddens = _extract_hiddens(training_step_output, self.trainer.lightning_module.truncated_bptt_steps)
 
+        print('in optimizer_loop.py in _training_step before from_training_step_output()', flush=True)
         result = self.output_result_cls.from_training_step_output(
             training_step_output, self.trainer.accumulate_grad_batches
         )
@@ -434,6 +452,7 @@ class OptimizerLoop(Loop[_OUTPUTS_TYPE]):
             assert self.trainer._results is not None
             self.trainer._results.cpu()
 
+        print('in optimizer_loop.py leaving _training_step', flush=True)
         return result
 
     def _build_kwargs(self, kwargs: OrderedDict, opt_idx: int, hiddens: Optional[Any]) -> OrderedDict:

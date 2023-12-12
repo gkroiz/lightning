@@ -105,6 +105,7 @@ def _sync_ddp_if_available(
     Return:
         reduced value
     """
+    print('in distributed.py in _sync_ddp_if_available before _sync_ddp', flush=True)
     if _distributed_available():
         return _sync_ddp(result, group=group, reduce_op=reduce_op)
     return result
@@ -122,6 +123,7 @@ def _sync_ddp(result: Tensor, group: Optional[Any] = None, reduce_op: Optional[U
     Return:
         reduced value
     """
+    print('in distributed.py in _sync_ddp', flush=True)
     divide_by_world_size = False
 
     if group is None:
@@ -150,8 +152,11 @@ def _sync_ddp(result: Tensor, group: Optional[Any] = None, reduce_op: Optional[U
             result = result.float()
 
     # Sync all processes before reduction
+    print('in distributed.py in _sync_ddp before barrier', flush=True)
     torch.distributed.barrier(group=group)
+    print('in distributed.py in _sync_ddp before all_reduce', flush=True)
     torch.distributed.all_reduce(result, op=op, group=group, async_op=False)
+    print('in distributed.py in _sync_ddp after all_reduce', flush=True)
 
     if divide_by_world_size:
         result = result / torch.distributed.get_world_size(group)
@@ -244,6 +249,7 @@ def _init_dist_connection(
     log.info(f"Initializing distributed: GLOBAL_RANK: {global_rank}, MEMBER: {global_rank + 1}/{world_size}")
     torch.distributed.init_process_group(torch_distributed_backend, rank=global_rank, world_size=world_size, **kwargs)
 
+    print('in distributed.py after init_process_group', flush=True)
     # On rank=0 let everyone know training is starting
     rank_zero_info(
         f"{'-' * 100}\n"

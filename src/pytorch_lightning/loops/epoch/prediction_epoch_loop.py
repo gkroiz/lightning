@@ -90,6 +90,7 @@ class PredictionEpochLoop(Loop):
         self._seen_batch_indices = self._seen_batch_indices[: (self.batch_progress.current.completed + 1)]
 
         if batch is None:
+            print('in prediction_epoch_loop.py before raise StopIteration', flush=True)
             raise StopIteration
 
         batch = self.trainer.lightning_module._on_before_batch_transfer(batch, dataloader_idx=dataloader_idx)

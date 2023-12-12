@@ -149,18 +149,28 @@ class DDPStrategy(ParallelStrategy):
             self._rank_0_will_call_children_scripts = True
 
     def setup_environment(self) -> None:
+        print('in ddp.py before setup_distributed', flush=True)
         self.setup_distributed()
+        print('in ddp.py before super().setup_environment', flush=True)
         super().setup_environment()
+        print('in ddp.py after super().setup_environment', flush=True)
 
     def setup(self, trainer: "pl.Trainer") -> None:
         # share ddp pids to all processes
-        self._rank_0_will_call_children_scripts = bool(self.broadcast(self._rank_0_will_call_children_scripts))
+        print('in ddp.py in setup before broadcast', flush=True)
+        print('self._rank_0_will_call_children_scripts: ', self._rank_0_will_call_children_scripts, flush=True)
+        # self._rank_0_will_call_children_scripts = bool(self.broadcast(self._rank_0_will_call_children_scripts))
+        print('in ddp.py in setup after broadcast', flush=True)
+        print('in ddp.py before _should_run_deadlock_detection', flush=True)
         if self._should_run_deadlock_detection():
+            print('in ddp.py before _share_information_to_prevent_deadlock', flush=True)
             self._share_information_to_prevent_deadlock()
 
         assert self.accelerator is not None
+        print('in ddp.py before accelerator.setup', flush=True)
         self.accelerator.setup(trainer)
 
+        print('in ddp.py before model_to_device', flush=True)
         # move the model to the correct device
         self.model_to_device()
 
@@ -170,14 +180,18 @@ class DDPStrategy(ParallelStrategy):
         if trainer_fn == TrainerFn.FITTING:
             if self._layer_sync:
                 assert self.model is not None
+                print('in ddp.py before model_to_device', flush=True)
                 self.model = self._layer_sync.apply(self.model)
 
+        print('in ddp.py before setup_precision_plugin', flush=True)
         self.setup_precision_plugin()
 
         if trainer_fn == TrainerFn.FITTING:
+            print('in ddp.py before configure_ddp', flush=True)
             self.configure_ddp()
 
             # set up optimizers after the wrapped module has been moved to the device
+            print('in ddp.py before setup_optimizers', flush=True)
             self.setup_optimizers(trainer)
             _optimizers_to_device(self.optimizers, self.root_device)
 
@@ -186,6 +200,11 @@ class DDPStrategy(ParallelStrategy):
 
             if isinstance(self._ddp_comm_state, post_localSGD.PostLocalSGDState):
                 self._enable_model_averaging()
+        print('in ddp.py leaving setup', flush=True)
+
+    def _custom_optimizer_setup(self, trainer: "pl.Trainer") -> None:
+        self.setup_optimizers(trainer)
+        _optimizers_to_device(self.optimizers, self.root_device)
 
     def _setup_model(self, model: Module) -> DistributedDataParallel:
         """Wraps the model into a :class:`~torch.nn.parallel.distributed.DistributedDataParallel` module."""
@@ -200,7 +219,9 @@ class DDPStrategy(ParallelStrategy):
         rank_zero_only.rank = self.global_rank
         self._process_group_backend = self._get_process_group_backend()
         assert self.cluster_environment is not None
+        print('in ddp.py before _init_dist_connection', flush=True)
         _init_dist_connection(self.cluster_environment, self._process_group_backend, timeout=self._timeout)
+        print('in ddp.py after _init_dist_connection', flush=True)
 
     def _get_process_group_backend(self) -> str:
         return self._process_group_backend or _get_default_process_group_backend_for_device(self.root_device)
@@ -311,7 +332,19 @@ class DDPStrategy(ParallelStrategy):
         obj = [obj]
         if self.global_rank != src:
             obj = [None]  # type: ignore[list-item]
+        rank = torch.distributed.get_rank()
+        print(f'rank {rank} in ddp.py self.global_rank {self.global_rank}', flush=True)
+        print(f'rank {rank} in ddp.py _group.WORLD: ', _group.WORLD, flush=True)
+        print(f'rank {rank} in ddp.py world_size(_group.WORLD): ', torch.distributed.get_world_size(_group.WORLD), flush=True)
+        print(f'rank {rank} in ddp.py world_size(): ', torch.distributed.get_world_size(), flush=True)
+        
+        print(f'rank {rank} in ddp.py before barrier: ', flush=True)
+        torch.distributed.barrier()
+        print(f'rank {rank} in ddp.py before barrier: ', flush=True)
+        
+        print(f'rank {rank} in ddp.py before broadcast_object_list: ', flush=True)
         torch.distributed.broadcast_object_list(obj, src, group=_group.WORLD)
+        print(f'rank {rank} in ddp.py after broadcast_object_list: ', flush=True)
         return obj[0]
 
     def pre_backward(self, closure_loss: Tensor) -> None:
@@ -341,12 +374,15 @@ class DDPStrategy(ParallelStrategy):
         Return:
             reduced value, except when the input was not a tensor the output remains is unchanged
         """
+        print('in ddp.py in reduce before _sync_ddp_if_available', flush=True)
         if isinstance(tensor, Tensor):
             tensor = _sync_ddp_if_available(tensor, group, reduce_op=reduce_op)
         return tensor
 
     def training_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
+        print('in ddp.py in training_step', flush=True)
         assert self.model is not None
+        print('in ddp.py in training_step self.precision_plugin', flush=True)
         with self.precision_plugin.train_step_context():
             return self.model(*args, **kwargs)
 

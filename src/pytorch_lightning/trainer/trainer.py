@@ -542,6 +542,8 @@ class Trainer:
             num_sanity_val_steps,
         )
 
+        self.sibling = os.environ.get("SIBLING", None)
+
     def _setup_on_init(self) -> None:
         setup._log_device_info(self)
 
@@ -1006,6 +1008,7 @@ class Trainer:
     def _run(
         self, model: "pl.LightningModule", ckpt_path: Optional[str] = None
     ) -> Optional[Union[_EVALUATE_OUTPUT, _PREDICT_OUTPUT]]:
+        print("trainer.py in _run", flush=True)
         if model._compiler_ctx is not None:
             supported_strategies = [SingleDeviceStrategy, DDPStrategy, DDPFullyShardedNativeStrategy]
             if self.strategy is not None and not any(isinstance(self.strategy, s) for s in supported_strategies):
@@ -1019,6 +1022,7 @@ class Trainer:
                 )
 
         if self.state.fn == TrainerFn.FITTING:
+            print("trainer.py before _parse_loop_limits", flush=True)
             min_epochs, max_epochs = _parse_loop_limits(
                 self.min_steps, self.max_steps, self.min_epochs, self.max_epochs, self
             )
@@ -1026,36 +1030,55 @@ class Trainer:
             self.fit_loop.max_epochs = max_epochs
 
         # clean hparams
+        print("trainer.py before clean_namespace", flush=True)
         if hasattr(model, "hparams"):
             parsing.clean_namespace(model.hparams)
 
+        print("trainer.py before strategy.connect", flush=True)
         # attach model to the strategy
         self.strategy.connect(model)
 
+        print("trainer.py before _callback_connector._attach_model_callbacks", flush=True)
         self._callback_connector._attach_model_callbacks()
+        print("trainer.py before _callback_connector._attach_model_logging_functions", flush=True)
         self._callback_connector._attach_model_logging_functions()
 
+        print("trainer.py before verify_loop_configurations", flush=True)
         verify_loop_configurations(self)
 
         # hook
         log.detail(f"{self.__class__.__name__}: preparing data")
+        print("trainer.py before _data_connector.prepare_data", flush=True)
         self._data_connector.prepare_data()
 
         # ----------------------------
         # SET UP TRAINING
         # ----------------------------
         log.detail(f"{self.__class__.__name__}: setting up strategy environment")
+        print("trainer.py before strategy.setup_environment", flush=True)
         self.strategy.setup_environment()
+
+        print("trainer.py before setup sibling group", flush=True)
+        if self.sibling == "younger":
+            ranks = list(range(32,40)) + list(range(56,64))
+        else:
+            ranks = list(range(torch.distributed.get_world_size()))
+        self.sibling_group = torch.distributed.new_group(ranks=ranks)
+
+        print("trainer.py before __setup_profiler", flush=True)
         self.__setup_profiler()
+        print("trainer.py before _call_setup_hook", flush=True)
 
         self._call_setup_hook()  # allow user to setup lightning_module in accelerator environment
 
         # check if we should delay restoring checkpoint till later
         if not self.strategy.restore_checkpoint_after_setup:
+            print("trainer.py before _restore_modules_and_callbacks", flush=True)
             log.detail(f"{self.__class__.__name__}: restoring module and callbacks from checkpoint path: {ckpt_path}")
             self._restore_modules_and_callbacks(ckpt_path)
 
         log.detail(f"{self.__class__.__name__}: configuring sharded model")
+        print("trainer.py before _call_configure_sharded_model", flush=True)
         self._call_configure_sharded_model()  # allow user to setup in model sharded environment
 
         # ----------------------------
@@ -1086,32 +1109,43 @@ class Trainer:
         # TRAIN
         # ----------------------------
         # reset logger connector
+        print("trainer.py before _logger_connector.reset_results", flush=True)
         self._logger_connector.reset_results()
+        print("trainer.py before _logger_connector.reset_metrics", flush=True)
         self._logger_connector.reset_metrics()
 
+        print("trainer.py before strategy.setup", flush=True)
         # strategy will configure model and move it to the device
         self.strategy.setup(self)
 
+        print("trainer.py before _call_callback_hooks on_fit_start", flush=True)
         # hook
         if self.state.fn == TrainerFn.FITTING:
+            print("trainer.py before _call_callback_hooks", flush=True)
             self._call_callback_hooks("on_fit_start")
+            print("trainer.py before _call_lightning_module_hook", flush=True)
             self._call_lightning_module_hook("on_fit_start")
 
+        print("trainer.py before _log_hyperparams", flush=True)
         self._log_hyperparams()
 
         if self.strategy.restore_checkpoint_after_setup:
             log.detail(f"{self.__class__.__name__}: restoring module and callbacks from checkpoint path: {ckpt_path}")
             self._restore_modules_and_callbacks(ckpt_path)
 
+        print("trainer.py before _checkpoint_connector.restore_training_state", flush=True)
         # restore optimizers, etc.
         log.detail(f"{self.__class__.__name__}: restoring training state")
         self._checkpoint_connector.restore_training_state()
 
+        print("trainer.py before _checkpoint_connector.resume_end", flush=True)
         self._checkpoint_connector.resume_end()
 
+        print("trainer.py before _run_stage", flush=True)
         results = self._run_stage()
 
         log.detail(f"{self.__class__.__name__}: trainer tearing down")
+        print("trainer.py before _teardown", flush=True)
         self._teardown()
 
         # ----------------------------
@@ -1181,28 +1215,35 @@ class Trainer:
         self._signal_connector.teardown()
 
     def _run_stage(self) -> Optional[Union[_PREDICT_OUTPUT, _EVALUATE_OUTPUT]]:
-        self.strategy.barrier("run-stage")
+        print("in trainer.py in _run_stage before run-stage barrier", flush=True)
+        self._custom_barrier("run-stage")
+        print("in trainer.py in _run_stage after run-stage barrier", flush=True)
         self.strategy.dispatch(self)
 
         if self.evaluating:
             return self._run_evaluate()
         if self.predicting:
             return self._run_predict()
+        print('in trainer.py in _run_stage before run_train', flush=True)
         self._run_train()
 
     def _pre_training_routine(self) -> None:
         # wait for all to join if on distributed
-        self.strategy.barrier("setup_training")
+        print("in trainer.py in _pre_training_routine before setup_training barrier", flush=True)
+        self._custom_barrier("setup_training")
+        print("in trainer.py in _pre_training_routine after setup_training barrier", flush=True)
 
         # register signals
         self._signal_connector.register_signal_handlers()
 
     def _run_train(self) -> None:
+        print('in trainer.py in _run_train before pre_training_routine', flush=True)
         self._pre_training_routine()
+        print('in trainer.py in _run_train after pre_training_routine', flush=True)
 
-        with isolate_rng():
-            self._run_sanity_check()
-
+        # with isolate_rng():
+            # self._run_sanity_check()
+        print('in trainer.py in _run_train after _run_sanity_check', flush=True)
         # enable train mode
         assert self.model is not None
         self.model.train()
@@ -1210,6 +1251,7 @@ class Trainer:
 
         self.fit_loop.trainer = self
 
+        print('in trainer.py in _run_train before fit_loop.run()', flush=True)
         with torch.autograd.set_detect_anomaly(self._detect_anomaly):
             self.fit_loop.run()
 
@@ -1244,6 +1286,7 @@ class Trainer:
             return self.predict_loop.run()
 
     def _run_sanity_check(self) -> None:
+        print('in trainer.py in _run_sanity_check', flush=True)
         val_loop = self.fit_loop.epoch_loop.val_loop
 
         should_sanity_check = (
@@ -1255,34 +1298,44 @@ class Trainer:
 
         # run tiny validation (if validation defined)
         # to make sure program won't crash during val
+        print('in trainer.py in _run_sanity_check, should_sanity_check: ', should_sanity_check, flush=True)
         if should_sanity_check:
             stage = self.state.stage
             self.sanity_checking = True
 
             # reset logger connector
+            print('in trainer.py in _run_sanity_check, before _logger_connector.reset_results', flush=True)
             self._logger_connector.reset_results()
+            print('in trainer.py in _run_sanity_check, before _logger_connector.reset_metrics', flush=True)
             self._logger_connector.reset_metrics()
 
+            print('in trainer.py in _run_sanity_check, before _call_callback_hooks(on_sanity_check_start)', flush=True)
             self._call_callback_hooks("on_sanity_check_start")
 
             # reload dataloaders
+            print('in trainer.py in _run_sanity_check, before _reload_evaluation_dataloaders', flush=True)
             val_loop._reload_evaluation_dataloaders()
             self.num_sanity_val_batches = [
                 min(self.num_sanity_val_steps, val_batches) for val_batches in self.num_val_batches
             ]
 
             # run eval step
+            print('in trainer.py in _run_sanity_check, before val_loop.run()', flush=True)
             with torch.no_grad():
                 val_loop.run()
 
+            print('in trainer.py in _run_sanity_check, before _call_callback_hooks(on_sanity_check_end)', flush=True)
             self._call_callback_hooks("on_sanity_check_end")
 
             # reset logger connector
+            print('in trainer.py in _run_sanity_check, before _logger_connector.reset_results', flush=True)
             self._logger_connector.reset_results()
+            print('in trainer.py in _run_sanity_check, before _logger_connector.reset_metrics', flush=True)
             self._logger_connector.reset_metrics()
 
             # reset the progress tracking state after sanity checking. we don't need to set the state before
             # because sanity check only runs when we are not restarting
+            print('in trainer.py in _run_sanity_check, before _reset_progress', flush=True)
             _reset_progress(val_loop)
 
             # restore the previous stage when the sanity check if finished
@@ -1292,14 +1345,21 @@ class Trainer:
         assert self.state.fn is not None
         fn = self.state.fn
 
-        self.strategy.barrier("pre_setup")
+        print("in trainer.py in _call_setup_hook before pre_setup barrier", flush=True)
+        self._custom_barrier("pre_setup")
 
+        print('in trainer.py self.datamodule: ', self.datamodule, flush=True)
         if self.datamodule is not None:
+            print('in trainer.py before _call_lightning_datamodule_hook', flush=True)
             self._call_lightning_datamodule_hook("setup", stage=fn)
+        print('in trainer.py before _call_callback_hooks', flush=True)
         self._call_callback_hooks("setup", stage=fn)
+        print('in trainer.py before _call_lightning_module_hook', flush=True)
         self._call_lightning_module_hook("setup", stage=fn)
+        print('in trainer.py after _call_lightning_module_hook', flush=True)
 
-        self.strategy.barrier("post_setup")
+        print("in trainer.py in _call_setup_hook before post_setup barrier", flush=True)
+        self._custom_barrier("post_setup")
 
     def _call_configure_sharded_model(self) -> None:
         with self.strategy.model_sharded_context():
@@ -1340,20 +1400,28 @@ class Trainer:
         pl_module: Optional["pl.LightningModule"] = None,
         **kwargs: Any,
     ) -> Any:
+        print('in trainer.py in _call_lightning_module_hook', flush=True)
         pl_module = pl_module or self.lightning_module
 
         if pl_module is None:
             raise TypeError("No `LightningModule` is available to call hooks on.")
 
+        print('in trainer.py before fn', flush=True)
         fn = getattr(pl_module, hook_name)
         if not callable(fn):
             return
 
         prev_fx_name = pl_module._current_fx_name
         pl_module._current_fx_name = hook_name
+        print('in trainer.py prev_fx_name', prev_fx_name, flush=True)
+        print('in trainer.py pl_module._current_fx_name', pl_module._current_fx_name, flush=True)
+        print('in trainer.py pl_module.__class__.__name__', pl_module.__class__.__name__, flush=True)
+        print('in trainer.py pl_module._current_fx_name', pl_module._current_fx_name, flush=True)
 
+        print('in trainer.py in _call_lightning_module_hook before self.profiler.profile', flush=True)
         with self.profiler.profile(f"[LightningModule]{pl_module.__class__.__name__}.{hook_name}"):
             output = fn(*args, **kwargs)
+        print('in trainer.py in _call_lightning_module_hook after self.profiler.profile', flush=True)
 
         # restore current_fx when nested context
         pl_module._current_fx_name = prev_fx_name
@@ -1387,11 +1455,18 @@ class Trainer:
             prev_fx_name = pl_module._current_fx_name
             pl_module._current_fx_name = hook_name
 
+        print('pl_module: ', pl_module, flush=True)
+        print('prev_fx_name: ', prev_fx_name, flush=True)
+        print('hook_name: ', hook_name, flush=True)
+        print('self.callbacks: ', self.callbacks, flush=True)
         for callback in self.callbacks:
             fn = getattr(callback, hook_name)
             if callable(fn):
+                print('in trainer.py in _call_callback_hooks before self.profiler.profile', flush=True)
+                print(f"in trainer.py [Callback]{callback.state_key}.{hook_name}", flush=True)
                 with self.profiler.profile(f"[Callback]{callback.state_key}.{hook_name}"):
                     fn(self, self.lightning_module, *args, **kwargs)
+                print('in trainer.py after fn', flush=True)
 
         if pl_module:
             # restore current_fx when nested context
@@ -1485,13 +1560,18 @@ class Trainer:
         pl_module = self.lightning_module
         prev_fx_name = pl_module._current_fx_name
         pl_module._current_fx_name = hook_name
-
+        print('in trainer.py in _call_strategy_hook', flush=True)
         fn = getattr(self.strategy, hook_name)
         if not callable(fn):
             return
 
+        print(f'in trainer.py in _call_strategy_hook, {self.strategy.__class__.__name__}', flush=True)
+        print(f'in trainer.py in _call_strategy_hook, {hook_name}', flush=True)
+        print('in trainer.py in _call_lightning_module_hook before self.profiler.profile', flush=True)
         with self.profiler.profile(f"[Strategy]{self.strategy.__class__.__name__}.{hook_name}"):
             output = fn(*args, **kwargs)
+
+        print('in trainer.py in _call_lightning_module_hook after self.profiler.profile', flush=True)
 
         # restore current_fx when nested context
         pl_module._current_fx_name = prev_fx_name
@@ -1503,6 +1583,7 @@ class Trainer:
         torch._C._log_api_usage_once("lightning.trainer." + event)
 
     def __setup_profiler(self) -> None:
+        print('in trainer.py in __setup_profiler', flush=True)
         assert self.state.fn is not None
         local_rank = self.local_rank if self.world_size > 1 else None
         self.profiler._lightning_module = proxy(self.lightning_module)
@@ -1519,6 +1600,7 @@ class Trainer:
         Args:
             model: The ``LightningModule`` if calling this outside of the trainer scope.
         """
+        print('in trainer.py in reset_train_dataloader', flush=True)
         source = self._data_connector._train_dataloader_source
         pl_module = model or self.lightning_module
         has_step = is_overridden("training_step", pl_module)
@@ -1526,14 +1608,19 @@ class Trainer:
         if not (source.is_defined() and has_step and enable_training):
             return
 
+        print('in trainer.py in reset_train_dataloader before _request_dataloader', flush=True)
         self.train_dataloader = self._data_connector._request_dataloader(RunningStage.TRAINING)
+        print('in trainer.py in reset_train_dataloader after _request_dataloader', flush=True)
 
         if self.overfit_batches > 0:
+            print('in trainer.py in reset_train_dataloader before _resolve_overfit_batches', flush=True)
             self.train_dataloader = self._data_connector._resolve_overfit_batches(
                 self.train_dataloader, mode=RunningStage.TRAINING
             )
+            print('in trainer.py in reset_train_dataloader after _resolve_overfit_batches', flush=True)
 
         # automatically add samplers
+        print('in trainer.py in reset_train_dataloader before apply_to_collection', flush=True)
         self.train_dataloader = apply_to_collection(
             self.train_dataloader,
             (DataLoader, CombinedLoader),
@@ -1547,13 +1634,16 @@ class Trainer:
         )
 
         # check the workers recursively
+        print('in trainer.py in reset_train_dataloader before _worker_check', flush=True)
         apply_to_collection(loaders, DataLoader, self._data_connector._worker_check, "train_dataloader")
 
         # add worker_init_fn for correct seeding in worker processes
+        print('in trainer.py in reset_train_dataloader before _auto_add_worker_init_fn', flush=True)
         apply_to_collection(loaders, DataLoader, _auto_add_worker_init_fn, rank=self.global_rank)
 
         # add collate_fn to collect metadata for fault tolerant training
         if _fault_tolerant_training():
+            print('in trainer.py in reset_train_dataloader before _add_capture_metadata_collate', flush=True)
             apply_to_collection(loaders, DataLoader, _add_capture_metadata_collate)
 
         # wrap the sequence of train loaders to a CombinedLoader object for computing the num_training_batches
@@ -1561,9 +1651,10 @@ class Trainer:
             self.train_dataloader = CombinedLoader(loaders, self._data_connector.multiple_trainloader_mode)
 
         module = model or self.lightning_module or self.datamodule
+        print('in trainer.py in reset_train_dataloader before self.num_training_batches', flush=True)
         orig_train_batches = self.num_training_batches = (
             len(self.train_dataloader)  # type: ignore[arg-type]
-            if has_len_all_ranks(self.train_dataloader, self.strategy, module)
+            if has_len_all_ranks(self.train_dataloader, self.strategy, module, self.sibling_group)
             else float("inf")
         )
         if orig_train_batches == 0:
@@ -1592,7 +1683,7 @@ class Trainer:
                     "If you want to validate based on the total training batches, set `check_val_every_n_epoch=None`."
                 )
         else:
-            if not has_len_all_ranks(self.train_dataloader, self.strategy, module):
+            if not has_len_all_ranks(self.train_dataloader, self.strategy, module, group=self.sibling_group):
                 if self.val_check_interval == 1.0:
                     self.val_check_batch = float("inf")
                 else:
@@ -1633,6 +1724,7 @@ class Trainer:
         Args:
             model: The ``LightningModule`` if called outside of the trainer scope.
         """
+        print('in trainer.py in reset_val_dataloader', flush=True)
         source = self._data_connector._val_dataloader_source
         pl_module = self.lightning_module or model
         has_step = is_overridden("validation_step", pl_module)
@@ -1640,12 +1732,14 @@ class Trainer:
         if source.is_defined() and has_step and enable_validation:
             # store epoch of dataloader reset for reload_dataloaders_every_n_epochs
             # it should not reload again if it has already reloaded during sanity_check
+            print('in trainer.py in reset_val_dataloader before check _should_check_val_epoch', flush=True)
             if self.state.fn == TrainerFn.FITTING and (
                 (self.sanity_checking and self.fit_loop.epoch_loop._should_check_val_epoch())
                 or not self.sanity_checking
             ):
                 self._last_val_dl_reload_epoch = self.current_epoch
 
+            print('in trainer.py in reset_val_dataloader before check _reset_eval_dataloader', flush=True)
             self.num_val_batches, self.val_dataloaders = self._data_connector._reset_eval_dataloader(
                 RunningStage.VALIDATING, model=pl_module
             )
@@ -1656,6 +1750,7 @@ class Trainer:
         Args:
             model: The ``LightningModule`` if called outside of the trainer scope.
         """
+        print('in trainer.py in reset_test_dataloader', flush=True)
         source = self._data_connector._test_dataloader_source
         pl_module = self.lightning_module or model
         has_step = is_overridden("test_step", pl_module)
@@ -1671,6 +1766,7 @@ class Trainer:
         Args:
             model: The ``LightningModule`` if called outside of the trainer scope.
         """
+        print('in trainer.py in reset_predict_dataloader', flush=True)
         source = self._data_connector._predict_dataloader_source
         pl_module = self.lightning_module or model
         enable_prediction = self.limit_predict_batches > 0
@@ -1678,6 +1774,12 @@ class Trainer:
             self.num_predict_batches, self.predict_dataloaders = self._data_connector._reset_eval_dataloader(
                 RunningStage.PREDICTING, model=pl_module
             )
+
+    def _custom_barrier(self, barrier_name: str = ""):
+        if self.sibling == "younger":
+            dist.barrier(group=self.sibling_group)
+        else:
+            self.strategy.barrier(barrier_name)
 
     """
     Accelerator properties
@@ -2202,8 +2304,10 @@ class Trainer:
             return active_loop._results
 
     def _exit_gracefully_on_signal(self) -> None:
+        print('in trainer.py in _exit_gracefully_on_signal', flush=True)
         if not _fault_tolerant_training() or not self._should_terminate_gracefully():
             return
+        print('in trainer.py before ExitGracefullyException', flush=True)
         raise ExitGracefullyException(0)
 
     def _should_terminate_gracefully(self) -> bool:

@@ -186,6 +186,7 @@ class Loop(ABC, Generic[T]):
         Returns:
             The output of :attr:`on_run_end` (often outputs collected from each step of the loop)
         """
+        print('in loop.py in run', flush=True)
         if self.skip:
             return self.on_skip()
 
@@ -200,6 +201,7 @@ class Loop(ABC, Generic[T]):
                 self.on_advance_end()
                 self._restarting = False
             except StopIteration:
+                print('in loop.py self.done: ', self.done, flush=True)
                 break
         self._restarting = False
 

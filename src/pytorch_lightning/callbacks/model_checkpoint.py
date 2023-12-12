@@ -298,6 +298,7 @@ class ModelCheckpoint(Checkpoint):
 
     def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
         """Save a checkpoint at the end of the training epoch."""
+        print('in model_checkpoint.py in on_train_epoch_end', flush=True)
         if not self._should_skip_saving_checkpoint(trainer) and self._should_save_on_train_epoch_end(trainer):
             monitor_candidates = self._monitor_candidates(trainer)
             if self._every_n_epochs >= 1 and (trainer.current_epoch + 1) % self._every_n_epochs == 0:

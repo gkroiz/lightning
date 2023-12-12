@@ -99,12 +99,20 @@ def has_len_all_ranks(
     dataloader: Union[DataLoader, CombinedLoader],
     strategy: "pl.strategies.Strategy",
     model: Union["pl.LightningModule", "pl.LightningDataModule"],
+    group: Optional[Any] = None,
 ) -> bool:
     """Checks if a given Dataloader has ``__len__`` method implemented i.e. if it is a finite dataloader or
     infinite dataloader."""
+    rank = torch.distributed.get_rank()
+    print(f'rank {rank} | in data.py in has_len_all_ranks', flush=True)
+    print(f'rank {rank} | in data.py strategy.root_device: {strategy.root_device}', flush=True)
     try:
         local_length = len(dataloader)  # type: ignore [arg-type] # we are checking with duck-typing
-        total_length = strategy.reduce(torch.tensor(local_length, device=strategy.root_device), reduce_op="sum")
+        print(f'rank {rank} | in data.py local_length: ', local_length, flush=True)
+        print(f'rank {rank} | in data.py in has_len_all_ranks before reduce', flush=True)
+        total_length = strategy.reduce(torch.tensor(local_length, device=strategy.root_device), group=group, reduce_op="sum")
+        print(f'rank {rank} | in data.py total_length: ', local_length, flush=True)
+        print(f'rank {rank} | in data.py in has_len_all_ranks after reduce', flush=True)
 
         if total_length == 0:
             rank_zero_warn(

@@ -204,6 +204,7 @@ class TrainingEpochLoop(loops.Loop[_OUTPUTS_TYPE]):
             response = self.trainer._call_lightning_module_hook("on_train_batch_start", batch, batch_idx)
             self.trainer._call_strategy_hook("on_train_batch_start", batch, batch_idx)
             if response == -1:
+                print('in training_epoch_loop.py before StopIteration', flush=True)
                 self.batch_progress.increment_processed()
                 raise StopIteration
 
