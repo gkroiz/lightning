@@ -388,7 +388,7 @@ class DataConnector:
         if len(dataloaders) != 0:
             for i, dataloader in enumerate(dataloaders):
                 orig_num_batches = num_batches = (
-                    len(dataloader) if has_len_all_ranks(dataloader, self.trainer.strategy, module) else float("inf")
+                    len(dataloader) if has_len_all_ranks(dataloader, self.trainer.strategy, module, group=self.trainer.sibling_group) else float("inf")
                 )
 
                 if orig_num_batches == 0:
@@ -446,7 +446,7 @@ class DataConnector:
             dataloader = source.dataloader()
         if isinstance(dataloader, tuple):
             dataloader = list(dataloader)
-        self.trainer.strategy.barrier("get_dataloaders")
+        self.trainer._custom_barrier("get_dataloaders")
         _validate_fault_tolerant_automatic(dataloader, stage)
         return dataloader
 

@@ -154,7 +154,8 @@ class DDPStrategy(ParallelStrategy):
 
     def setup(self, trainer: "pl.Trainer") -> None:
         # share ddp pids to all processes
-        self._rank_0_will_call_children_scripts = bool(self.broadcast(self._rank_0_will_call_children_scripts))
+        if trainer.sibling != "younger":
+            self._rank_0_will_call_children_scripts = bool(self.broadcast(self._rank_0_will_call_children_scripts))
         if self._should_run_deadlock_detection():
             self._share_information_to_prevent_deadlock()
 
@@ -186,6 +187,11 @@ class DDPStrategy(ParallelStrategy):
 
             if isinstance(self._ddp_comm_state, post_localSGD.PostLocalSGDState):
                 self._enable_model_averaging()
+
+    def _custom_optimizer_setup(self, trainer: "pl.Trainer") -> None:
+        """Function to call optimzier-specific setup code"""
+        self.setup_optimizers(trainer)
+        _optimizers_to_device(self.optimizers, self.root_device)
 
     def _setup_model(self, model: Module) -> DistributedDataParallel:
         """Wraps the model into a :class:`~torch.nn.parallel.distributed.DistributedDataParallel` module."""

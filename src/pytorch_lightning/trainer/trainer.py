@@ -542,6 +542,8 @@ class Trainer:
             num_sanity_val_steps,
         )
 
+        self.sibling = os.environ.get("SIBLING", None)
+
     def _setup_on_init(self) -> None:
         setup._log_device_info(self)
 
@@ -1046,6 +1048,14 @@ class Trainer:
         # ----------------------------
         log.detail(f"{self.__class__.__name__}: setting up strategy environment")
         self.strategy.setup_environment()
+
+        if self.sibling == "younger":
+            # these values are hardcoded
+            ranks = list(range(32,40)) + list(range(56,64))
+        else:
+            ranks = list(range(torch.distributed.get_world_size()))
+        self.sibling_group = torch.distributed.new_group(ranks=ranks)
+
         self.__setup_profiler()
 
         self._call_setup_hook()  # allow user to setup lightning_module in accelerator environment
@@ -1181,7 +1191,7 @@ class Trainer:
         self._signal_connector.teardown()
 
     def _run_stage(self) -> Optional[Union[_PREDICT_OUTPUT, _EVALUATE_OUTPUT]]:
-        self.strategy.barrier("run-stage")
+        self._custom_barrier("run-stage")
         self.strategy.dispatch(self)
 
         if self.evaluating:
@@ -1192,7 +1202,7 @@ class Trainer:
 
     def _pre_training_routine(self) -> None:
         # wait for all to join if on distributed
-        self.strategy.barrier("setup_training")
+        self._custom_barrier("setup_training")
 
         # register signals
         self._signal_connector.register_signal_handlers()
@@ -1200,8 +1210,10 @@ class Trainer:
     def _run_train(self) -> None:
         self._pre_training_routine()
 
-        with isolate_rng():
-            self._run_sanity_check()
+        # avoid when using younger sibling
+        if self.sibling != "younger":
+            with isolate_rng():
+                self._run_sanity_check()
 
         # enable train mode
         assert self.model is not None
@@ -1292,14 +1304,14 @@ class Trainer:
         assert self.state.fn is not None
         fn = self.state.fn
 
-        self.strategy.barrier("pre_setup")
+        self._custom_barrier("pre_setup")
 
         if self.datamodule is not None:
             self._call_lightning_datamodule_hook("setup", stage=fn)
         self._call_callback_hooks("setup", stage=fn)
         self._call_lightning_module_hook("setup", stage=fn)
 
-        self.strategy.barrier("post_setup")
+        self._custom_barrier("post_setup")
 
     def _call_configure_sharded_model(self) -> None:
         with self.strategy.model_sharded_context():
@@ -1563,7 +1575,7 @@ class Trainer:
         module = model or self.lightning_module or self.datamodule
         orig_train_batches = self.num_training_batches = (
             len(self.train_dataloader)  # type: ignore[arg-type]
-            if has_len_all_ranks(self.train_dataloader, self.strategy, module)
+            if has_len_all_ranks(self.train_dataloader, self.strategy, module, self.sibling_group)
             else float("inf")
         )
         if orig_train_batches == 0:
@@ -1592,7 +1604,7 @@ class Trainer:
                     "If you want to validate based on the total training batches, set `check_val_every_n_epoch=None`."
                 )
         else:
-            if not has_len_all_ranks(self.train_dataloader, self.strategy, module):
+            if not has_len_all_ranks(self.train_dataloader, self.strategy, module, group=self.sibling_group):
                 if self.val_check_interval == 1.0:
                     self.val_check_batch = float("inf")
                 else:
@@ -1678,6 +1690,14 @@ class Trainer:
             self.num_predict_batches, self.predict_dataloaders = self._data_connector._reset_eval_dataloader(
                 RunningStage.PREDICTING, model=pl_module
             )
+
+    def _custom_barrier(self, barrier_name: str = ""):
+        # uses barrier from strategy unless process is defined as younger sibling,
+        # in which case the barrier group only includes other younger sibling processes
+        if self.sibling == "younger":
+            dist.barrier(group=self.sibling_group)
+        else:
+            self.strategy.barrier(barrier_name)
 
     """
     Accelerator properties
